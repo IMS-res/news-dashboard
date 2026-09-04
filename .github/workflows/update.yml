@@ -51,19 +51,25 @@ jobs:
         run: gh issue create --title "New PBS/SBP economic release" --body-file alert.md
 
       - name: Remember what was seen
+        continue-on-error: true
         run: |
           if [[ -n "$(git status --porcelain state.json)" ]]; then
             git config user.name "github-actions"
             git config user.email "github-actions@users.noreply.github.com"
             git add state.json
             git commit -m "update seen state"
-            git push
+            for i in 1 2 3; do
+              git pull --rebase --autostash origin main && git push && break
+              echo "push attempt $i failed, retrying..."
+              sleep 3
+            done
           fi
 
       - name: Prepare the page
         run: |
           mkdir -p _site
           cp index.html _site/index.html
+          cp -f markets.csv economic.csv news.csv _site/ 2>/dev/null || true
 
       - name: Upload the page
         uses: actions/upload-pages-artifact@v3
