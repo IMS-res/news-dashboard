@@ -1,0 +1,55 @@
+# This file tells GitHub: "run my script on a timer and publish the webpage."
+# You do not need to change anything here.
+
+name: Update dashboard
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"   # every 2 hours (times are in UTC)
+  workflow_dispatch:          # lets you also run it by hand with a button
+  push:
+    branches: [ main ]        # and runs once whenever you save a change
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libraries
+        run: pip install -r requirements.txt
+
+      - name: Build the dashboard
+        run: python main.py
+
+      - name: Prepare the page
+        run: |
+          mkdir -p _site
+          cp index.html _site/index.html
+
+      - name: Upload the page
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Publish to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
