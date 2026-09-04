@@ -6,7 +6,7 @@ name: Update dashboard
 
 on:
   schedule:
-    - cron: "*/30 * * * *"     # every 30 minutes (UTC; GitHub may lag a little)
+    - cron: "*/5 * * * *"      # every 5 minutes (UTC; GitHub may lag a little)
   workflow_dispatch:            # run-by-hand button
   push:
     branches: [ main ]
