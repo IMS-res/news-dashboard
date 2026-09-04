@@ -1,22 +1,26 @@
-# This file tells GitHub: "run my script on a timer and publish the webpage."
+# Runs the dashboard on a timer, publishes the page, remembers what it has seen,
+# and opens a GitHub issue (which emails you) when PBS/SBP post something new.
 # You do not need to change anything here.
 
 name: Update dashboard
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # every 2 hours (times are in UTC)
-  workflow_dispatch:          # lets you also run it by hand with a button
+    - cron: "*/30 * * * *"     # every 30 minutes (UTC; GitHub may lag a little)
+  workflow_dispatch:            # run-by-hand button
   push:
-    branches: [ main ]        # and runs once whenever you save a change
+    branches: [ main ]
+    paths-ignore:
+      - 'state.json'            # ignore the memory file so saving it can't loop
 
 permissions:
-  contents: read
+  contents: write               # to save state.json back to the repo
+  issues: write                 # to open the alert issue
   pages: write
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: "dashboard"
   cancel-in-progress: false
 
 jobs:
@@ -39,6 +43,22 @@ jobs:
 
       - name: Build the dashboard
         run: python main.py
+
+      - name: Send alert if new PBS/SBP release
+        if: hashFiles('alert.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh issue create --title "New PBS/SBP economic release" --body-file alert.md
+
+      - name: Remember what was seen
+        run: |
+          if [[ -n "$(git status --porcelain state.json)" ]]; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git add state.json
+            git commit -m "update seen state"
+            git push
+          fi
 
       - name: Prepare the page
         run: |
