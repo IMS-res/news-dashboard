@@ -13,6 +13,7 @@
 
 import re
 import os
+import csv
 import json
 import html
 import datetime
@@ -329,6 +330,45 @@ def fetch_sbp_data():
         return []
 
 
+def write_csvs(sections):
+    """Also emit clean CSV files for Excel (Power Query) to read."""
+    stamp = _now().strftime("%Y-%m-%d %H:%M UTC")
+
+    with open("markets.csv", "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["Name", "Group", "Value", "ChangePercent", "Link", "UpdatedUTC"])
+        for title, items in sections:
+            if not title.startswith("Market Snapshot"):
+                continue
+            for it in items:
+                if it.get("kind") == "quote":
+                    w.writerow([it["name"], it.get("group", ""), it["value"],
+                                f'{it["pct"]:.2f}', it["link"], stamp])
+
+    with open("economic.csv", "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["Source", "Title", "Date", "Link", "UpdatedUTC"])
+        for title, items in sections:
+            if not title.startswith("Economic Data"):
+                continue
+            for it in items:
+                d = it.get("date")
+                w.writerow([it.get("source", ""), it["title"],
+                            d.isoformat() if d else "", it["link"], stamp])
+
+    with open("news.csv", "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["Category", "Source", "Title", "New", "Link", "UpdatedUTC"])
+        for title, items in sections:
+            if title.startswith("Market Snapshot") or title.startswith("Economic Data"):
+                continue
+            for it in items:
+                w.writerow([title, it.get("source", ""), it["title"],
+                            "YES" if it.get("new") else "", it["link"], stamp])
+
+    print("  Wrote markets.csv, economic.csv, news.csv")
+
+
 def build_page(sections):
     stamp = _now().strftime("%d %b %Y, %H:%M UTC")
     out = ["""<!doctype html><html lang="en"><head>
@@ -424,8 +464,9 @@ def main():
 
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(build_page(sections))
+    write_csvs(sections)
     total = sum(len(i) for _, i in sections)
-    print(f"\nDONE. index.html written with {total} items.")
+    print(f"\nDONE. index.html + CSVs written with {total} items.")
 
 
 if __name__ == "__main__":
