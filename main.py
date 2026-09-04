@@ -86,15 +86,28 @@ GOV_SOURCES = [
                      "qim", "report", "summary", "index", "survey", "account",
                      "gdp", "release"],
     },
-    {
-        "category": "Economic Data - SBP (State Bank)",
-        "name": "SBP press releases",
-        "url": "https://www.sbp.org.pk/press/index.htm",
-        "priority": ["policy", "rate", "reserves", "monetary", "inflation",
-                     "review", "statement", "reserve", "report", "release"],
-    },
 ]
 GOV_ITEMS = 12
+
+# SBP economic & monetary data: which series to track & show (keyword match on
+# the dataset name). Add or remove lines to change what you follow.
+SBP_URL = "https://www.sbp.org.pk/economic-data"
+SBP_WATCH = [
+    "foreign exchange reserves", "official reserve assets",
+    "international reserves and foreign currency liquidity",
+    "broad money", "reserve money", "central bank survey",
+    "monetary policy instruments changes",
+    "weighted average lending and deposit", "kibor", "structure of interest rate",
+    "summary of balance of payments", "balance of trade",
+    "central government debt", "pakistan debt and liabilities summary",
+    "gross domestic product", "quarterly gdp",
+    "spi-inflation", "inflation snapshot",
+    "market treasury bills auction result",
+    "pakistan investment bonds auction results",
+    "open market operations (omo) results",
+    "summary of foreign investment",
+]
+SBP_ITEMS = 16
 
 # Your GitHub username - used to @mention you in the alert so you get an email.
 # If this is wrong you simply won't get the mention; change it to match.
@@ -185,7 +198,7 @@ def fetch_gov(source):
             score = 1 if any(k in text.lower() for k in priority) else 0
             found.append((score, len(found),
                           {"title": text, "link": href, "new": False,
-                           "source": source["name"]}))
+                           "source": source["name"], "id": href, "notify": True}))
         found.sort(key=lambda x: (-x[0], x[1]))
         items = [f[2] for f in found[:GOV_ITEMS]]
         status = f"OK  {len(items):>2} items" if items else "NO ITEMS - layout may have changed"
@@ -237,7 +250,7 @@ def fetch_quotes():
 def process_alerts(gov_items):
     """Detect brand-new PBS/SBP releases; write alert.md for the workflow."""
     STATE, ALERT = "state.json", "alert.md"
-    links = [g["link"] for g in gov_items]
+    ids = [g.get("id", g["link"]) for g in gov_items]
     first_run = not os.path.exists(STATE)
     seen = set()
     if not first_run:
@@ -245,9 +258,10 @@ def process_alerts(gov_items):
             seen = set(json.load(open(STATE)))
         except Exception:
             seen = set()
-    new = [g for g in gov_items if g["link"] not in seen]
-    updated = list(seen) + [l for l in links if l not in seen]
-    json.dump(updated[-800:], open(STATE, "w"))
+    new = [g for g in gov_items
+           if g.get("id", g["link"]) not in seen and g.get("notify", True)]
+    updated = list(seen) + [i for i in ids if i not in seen]
+    json.dump(updated[-1200:], open(STATE, "w"))
 
     if first_run:
         print("  First run - baseline saved, no alert sent.")
@@ -261,6 +275,58 @@ def process_alerts(gov_items):
         print(f"  ALERT: {len(new)} new release(s) -> {ALERT}")
     else:
         print("  No new PBS/SBP releases this run.")
+
+
+def _parse_date(text):
+    m = re.search(r"([A-Z][a-z]+)\s+(\d{1,2}),?\s+(\d{4})", text)
+    if not m:
+        return None
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.datetime.strptime(
+                f"{m.group(1)} {m.group(2)} {m.group(3)}", fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def fetch_sbp_data():
+    """Read SBP's Economic Data page; keep only the watchlist series."""
+    try:
+        resp = requests.get(SBP_URL, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        rows = {}
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "/assets/document/" not in href and "easydata.sbp.org.pk" not in href:
+                continue
+            parent = a.find_parent("tr") or a.parent
+            text = " ".join(parent.get_text().split()).replace("View All", "")
+            text = re.sub(r"\b(pdf|xls|xlsx|excel)\b", "", text, flags=re.I)
+            text = " ".join(text.split()).strip(" -")
+            if len(text) < 12:
+                continue
+            low = text.lower()
+            if not any(k in low for k in SBP_WATCH):
+                continue
+            if text in rows:                      # same row's PDF + Excel -> once
+                continue
+            if href.startswith("/"):
+                href = "https://www.sbp.org.pk" + href
+            is_daily = bool(re.search(r"\bdaily\b", low))
+            rows[text] = {"title": text, "link": href, "new": False,
+                          "source": "SBP economic data", "id": text,
+                          "notify": not is_daily, "date": _parse_date(text)}
+        items = sorted(rows.values(),
+                       key=lambda x: x["date"] or datetime.date.min, reverse=True)
+        items = items[:SBP_ITEMS]
+        status = f"OK  {len(items):>2} items" if items else "NO ITEMS - layout may have changed"
+        print(f"  [{status}]  SBP economic data")
+        return items
+    except Exception as e:
+        print(f"  [ERROR - {e}]  SBP economic data")
+        return []
 
 
 def build_page(sections):
@@ -349,8 +415,11 @@ def main():
         items = fetch_gov(src)
         gov_items.extend(items)
         gov_sections.setdefault(src["category"], []).extend(items)
+    sbp_items = fetch_sbp_data()
+    gov_items.extend(sbp_items)
     for cat, items in gov_sections.items():
         sections.append((cat, items))
+    sections.append(("Economic Data - SBP (economic & monetary)", sbp_items))
     process_alerts(gov_items)
 
     with open("index.html", "w", encoding="utf-8") as f:
