@@ -222,34 +222,46 @@ def fetch_gov(source):
         return []
 
 
-def fetch_quotes():
-    """One request to Stooq for all symbols; returns section for the page."""
-    pairs = [(g, n, s) for g, lst in MARKET_SNAPSHOT.items() for n, s in lst]
-    symbols = ",".join(s for _, _, s in pairs)
-    url = f"https://stooq.com/q/l/?s={symbols}&f=sd2t2ohlcv&h&e=csv"
-    data = {}
+def _stooq_one(sym):
+    """Latest close + change% for one Stooq symbol. Tries light quote, then daily CSV."""
+    # 1) light quote endpoint (tiny response): Symbol,Date,Time,Open,H,L,Close,Vol
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        rows = [r for r in resp.text.splitlines() if r.strip()]
-        for row in rows[1:]:                       # skip header
-            c = row.split(",")
-            if len(c) < 7:
-                continue
-            sym = c[0].lower()
-            try:
+        u = f"https://stooq.com/q/l/?s={sym}&f=sd2t2ohlcv&h&e=csv"
+        r = requests.get(u, headers=HEADERS, timeout=20)
+        if r.status_code == 200:
+            rows = [x for x in r.text.splitlines() if x.strip()]
+            if len(rows) >= 2 and "N/D" not in rows[1]:
+                c = rows[1].split(",")
                 op, cl = float(c[3]), float(c[6])
-            except ValueError:
-                continue
-            pct = ((cl - op) / op * 100) if op else 0.0
-            data[sym] = (cl, pct)
-        print(f"  [OK  {len(data):>2} quotes]  Market snapshot (Stooq)")
-    except Exception as e:
-        print(f"  [ERROR - {e}]  Market snapshot (Stooq)")
+                return cl, (((cl - op) / op * 100) if op else 0.0)
+    except Exception:
+        pass
+    # 2) fallback: daily CSV for the last ~10 days, use last two closes
+    try:
+        today = _now().date()
+        start = today - datetime.timedelta(days=10)
+        u = (f"https://stooq.com/q/d/l/?s={sym}"
+             f"&d1={start.strftime('%Y%m%d')}&d2={today.strftime('%Y%m%d')}&i=d")
+        r = requests.get(u, headers=HEADERS, timeout=20)
+        rows = [x for x in r.text.splitlines()
+                if x.strip() and not x.lower().startswith("date")]
+        if rows:
+            last = rows[-1].split(",")            # Date,Open,High,Low,Close,Volume
+            cl = float(last[4])
+            prev = float(rows[-2].split(",")[4]) if len(rows) >= 2 else float(last[1])
+            return cl, (((cl - prev) / prev * 100) if prev else 0.0)
+    except Exception:
+        pass
+    return None
 
+
+def fetch_quotes():
+    """Fetch each market symbol individually (more reliable than one batched call)."""
+    pairs = [(g, n, s) for g, lst in MARKET_SNAPSHOT.items() for n, s in lst]
     items = []
+    ok = 0
     for group, name, sym in pairs:
-        q = data.get(sym.lower())
+        q = _stooq_one(sym)
         if not q:
             continue
         cl, pct = q
@@ -257,6 +269,9 @@ def fetch_quotes():
         items.append({"kind": "quote", "group": group, "name": name,
                       "value": val, "pct": pct,
                       "link": f"https://stooq.com/q/?s={sym}"})
+        ok += 1
+    status = f"OK  {ok:>2} quotes" if ok else "NO QUOTES - source may be blocking"
+    print(f"  [{status}]  Market snapshot (Stooq)")
     return items
 
 
@@ -513,12 +528,9 @@ def main():
         gov_sections.setdefault(src["category"], []).extend(items)
     sbp_items = fetch_sbp_data()
     gov_items.extend(sbp_items)
-    pama_items = fetch_pama()
-    gov_items.extend(pama_items)
     for cat, items in gov_sections.items():
         sections.append((cat, items))
     sections.append(("Economic Data - SBP (economic & monetary)", sbp_items))
-    sections.append(("Economic Data - PAMA (auto production & sales)", pama_items))
     process_alerts(gov_items)
 
     with open("index.html", "w", encoding="utf-8") as f:
