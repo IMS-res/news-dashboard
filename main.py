@@ -94,21 +94,33 @@ GOV_ITEMS = 12
 # the dataset name). Add or remove lines to change what you follow.
 SBP_URL = "https://www.sbp.org.pk/economic-data"
 SBP_WATCH = [
+    # reserves & external
     "foreign exchange reserves", "official reserve assets",
     "international reserves and foreign currency liquidity",
-    "broad money", "reserve money", "central bank survey",
+    "summary of balance of payments", "balance of trade",
+    "foreign exchange intervention", "intervention", "forward and swap",
+    "summary of foreign investment",
+    # money & monetary
+    "broad money", "monetary aggregate", "reserve money", "central bank survey",
+    "consumer financing", "consumer loan",
+    # policy, rates & operations
     "monetary policy instruments changes",
     "weighted average lending and deposit", "kibor", "structure of interest rate",
-    "summary of balance of payments", "balance of trade",
+    "repo rate", "reverse repo", "overnight repo",
+    "open market operation", "omo results", "bai-muajjal",
+    # auctions (t-bills, pibs, sukuk)
+    "market treasury bills auction", "treasury bills auction", "mtb auction",
+    "pakistan investment bonds auction", "pib auction",
+    "ijara sukuk", "sukuk auction", "gop ijara",
+    # debt & real sector
     "central government debt", "pakistan debt and liabilities summary",
     "gross domestic product", "quarterly gdp",
     "spi-inflation", "inflation snapshot",
-    "market treasury bills auction result",
-    "pakistan investment bonds auction results",
-    "open market operations (omo) results",
-    "summary of foreign investment",
 ]
-SBP_ITEMS = 16
+SBP_ITEMS = 45
+
+# PAMA monthly vehicle production & sales (a new PDF is posted each month).
+PAMA_URL = "https://pama.org.pk/monthly-production-sales-of-vehicles/"
 
 # Your GitHub username - used to @mention you in the alert so you get an email.
 # If this is wrong you simply won't get the mention; change it to match.
@@ -330,6 +342,39 @@ def fetch_sbp_data():
         return []
 
 
+def fetch_pama():
+    """PAMA posts a new 'Production-Sales-<Month>-<Year>.pdf' each month."""
+    try:
+        resp = requests.get(PAMA_URL, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        found = {}
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            low = href.lower()
+            if "production-sales" not in low or not low.endswith(".pdf"):
+                continue
+            fname = low.rsplit("/", 1)[-1]
+            year_m = re.search(r"20\d{2}", fname) or re.search(r"20\d{2}", low)
+            month = next((m for m in _MONTHS if m in fname), None)
+            if not year_m or not month:
+                continue
+            year = int(year_m.group())
+            if href.startswith("/"):
+                href = "https://pama.org.pk" + href
+            d = datetime.date(year, _MONTHS.index(month) + 1, 1)
+            found[href] = {"title": f"Auto Production & Sales - {month.title()} {year}",
+                           "link": href, "new": False, "source": "PAMA auto data",
+                           "id": href, "notify": True, "date": d}
+        items = sorted(found.values(), key=lambda x: x["date"], reverse=True)[:6]
+        status = f"OK  {len(items):>2} items" if items else "NO ITEMS - layout may have changed"
+        print(f"  [{status}]  PAMA auto data")
+        return items
+    except Exception as e:
+        print(f"  [ERROR - {e}]  PAMA auto data")
+        return []
+
+
 def write_csvs(sections):
     """Also emit clean CSV files for Excel (Power Query) to read."""
     stamp = _now().strftime("%Y-%m-%d %H:%M UTC")
@@ -457,9 +502,12 @@ def main():
         gov_sections.setdefault(src["category"], []).extend(items)
     sbp_items = fetch_sbp_data()
     gov_items.extend(sbp_items)
+    pama_items = fetch_pama()
+    gov_items.extend(pama_items)
     for cat, items in gov_sections.items():
         sections.append((cat, items))
     sections.append(("Economic Data - SBP (economic & monetary)", sbp_items))
+    sections.append(("Economic Data - PAMA (auto production & sales)", pama_items))
     process_alerts(gov_items)
 
     with open("index.html", "w", encoding="utf-8") as f:
