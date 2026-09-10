@@ -21,7 +21,7 @@ permissions:
 
 concurrency:
   group: "dashboard"
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-publish:
@@ -78,4 +78,5 @@ jobs:
 
       - name: Publish to GitHub Pages
         id: deploy
+        continue-on-error: true
         uses: actions/deploy-pages@v4
