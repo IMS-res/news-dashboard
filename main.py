@@ -87,6 +87,15 @@ GOV_SOURCES = [
                      "qim", "report", "summary", "index", "survey", "account",
                      "gdp", "release"],
     },
+    {
+        # Weekly SPI and cement price files are uploaded here first, often
+        # hours before the homepage "What's New" post appears.
+        "category": "Economic Data - PBS (Bureau of Statistics)",
+        "name": "PBS price statistics (SPI, cement, CPI)",
+        "url": "https://www.pbs.gov.pk/price-statistics/",
+        "priority": ["spi", "cement", "week ended", "annex", "price", "cpi",
+                     "review"],
+    },
 ]
 GOV_ITEMS = 12
 
