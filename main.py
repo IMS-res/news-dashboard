@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 # =============================================================================
 #  NEWS & DATA DASHBOARD
-#  Builds one webpage (index.html) with:
-#    - Local news by category (economy, company/sector, politics)
-#    - World & global-markets news + commodities
-#    - A live market snapshot (major indices + commodities levels)
-#    - Latest PBS & SBP economic releases
-#    - Alerts (a GitHub issue -> email) whenever PBS/SBP post something new
-#
-#  You only ever edit the CONFIG sections. Everything else runs by itself.
+#  - News by category + market snapshot + PBS/SBP economic data
+#  - Email alerts (via GitHub issue) when PBS/SBP post something new
+#  - CSV files for Excel
+#  You only edit the CONFIG sections.
 # =============================================================================
 
 import re
@@ -22,8 +18,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # -----------------------------------------------------------------------------
-#  CONFIG 1 - NEWS FEEDS, grouped into the categories shown on the page.
-#  Add/remove a source by copying or deleting a line (keep the quotes + comma).
+#  CONFIG 1 - NEWS FEEDS by category
 # -----------------------------------------------------------------------------
 FEEDS = {
     "Domestic Economic News": [
@@ -45,20 +40,18 @@ FEEDS = {
         ("Al Jazeera",        "https://www.aljazeera.com/xml/rss/all.xml"),
     ],
     "Global Markets & Commodities": [
-        ("CNBC - Wall Street",  "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
-        ("CNBC - Market Insider","https://www.cnbc.com/id/20409666/device/rss/rss.html"),
-        ("CNBC - Energy",        "https://www.cnbc.com/id/19836768/device/rss/rss.html"),
+        ("CNBC - Wall Street",     "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
+        ("CNBC - Market Insider",  "https://www.cnbc.com/id/20409666/device/rss/rss.html"),
+        ("CNBC - Energy",          "https://www.cnbc.com/id/19836768/device/rss/rss.html"),
         ("Investing - Commodities","https://www.investing.com/rss/news_11.rss"),
     ],
 }
 
-ITEMS_PER_SOURCE = 6        # headlines shown per news source
-NEW_BADGE_HOURS = 24        # a headline newer than this gets a NEW badge
+ITEMS_PER_SOURCE = 6
+NEW_BADGE_HOURS = 24
 
 # -----------------------------------------------------------------------------
-#  CONFIG 2 - MARKET SNAPSHOT (actual index & commodity levels, via Stooq).
-#  Indices start with ^, commodities end with .f, currencies are 6 letters.
-#  Values are end-of-day / delayed - fine for a dashboard, not for trading.
+#  CONFIG 2 - MARKET SNAPSHOT (Stooq symbols)
 # -----------------------------------------------------------------------------
 MARKET_SNAPSHOT = {
     "Indices": [
@@ -76,70 +69,46 @@ MARKET_SNAPSHOT = {
 }
 
 # -----------------------------------------------------------------------------
-#  CONFIG 3 - GOVERNMENT DATA (PBS + SBP) and ALERTS.
+#  CONFIG 3 - GOVERNMENT DATA (PBS + SBP) and ALERTS
 # -----------------------------------------------------------------------------
-GOV_SOURCES = [
-    {
-        "category": "Economic Data - PBS (Bureau of Statistics)",
-        "name": "PBS latest releases",
-        "url": "https://www.pbs.gov.pk/",
-        "priority": ["inflation", "trade", "spi", "cpi", "price", "manufacturing",
-                     "qim", "report", "summary", "index", "survey", "account",
-                     "gdp", "release"],
-    },
-    {
-        # Weekly SPI and cement price files are uploaded here first, often
-        # hours before the homepage "What's New" post appears.
-        "category": "Economic Data - PBS (Bureau of Statistics)",
-        "name": "PBS price statistics (SPI, cement, CPI)",
-        "url": "https://www.pbs.gov.pk/price-statistics/",
-        "priority": ["spi", "cement", "week ended", "annex", "price", "cpi",
-                     "review"],
-    },
-]
+GOV_SOURCES = [{
+    "category": "Economic Data - PBS (Bureau of Statistics)",
+    "name": "PBS latest releases",
+    "url": "https://www.pbs.gov.pk/",
+    "priority": ["inflation", "trade", "spi", "cpi", "price", "manufacturing",
+                 "qim", "report", "summary", "index", "survey", "account",
+                 "gdp", "release"],
+}]
 GOV_ITEMS = 12
 
-# SBP economic & monetary data: which series to track & show (keyword match on
-# the dataset name). Add or remove lines to change what you follow.
 SBP_URL = "https://www.sbp.org.pk/economic-data"
 SBP_WATCH = [
-    # reserves & external
     "foreign exchange reserves", "official reserve assets",
     "international reserves and foreign currency liquidity",
     "summary of balance of payments", "balance of trade",
     "foreign exchange intervention", "intervention", "forward and swap",
-    "summary of foreign investment",
-    # money & monetary
-    "broad money", "monetary aggregate", "reserve money", "central bank survey",
-    "consumer financing", "consumer loan",
-    # policy, rates & operations
-    "monetary policy instruments changes",
-    "weighted average lending and deposit", "kibor", "structure of interest rate",
-    "repo rate", "reverse repo", "overnight repo",
-    "open market operation", "omo results", "bai-muajjal",
-    # auctions (t-bills, pibs, sukuk)
-    "market treasury bills auction", "treasury bills auction", "mtb auction",
+    "summary of foreign investment", "broad money", "monetary aggregate",
+    "reserve money", "central bank survey", "consumer financing",
+    "consumer loan", "monetary policy instruments changes",
+    "weighted average lending and deposit", "kibor",
+    "structure of interest rate", "repo rate", "reverse repo",
+    "overnight repo", "open market operation", "omo results",
+    "bai-muajjal", "market treasury bills auction",
+    "treasury bills auction", "mtb auction",
     "pakistan investment bonds auction", "pib auction",
     "ijara sukuk", "sukuk auction", "gop ijara",
-    # debt & real sector
     "central government debt", "pakistan debt and liabilities summary",
-    "gross domestic product", "quarterly gdp",
-    "spi-inflation", "inflation snapshot",
+    "gross domestic product", "quarterly gdp", "spi-inflation",
+    "inflation snapshot",
 ]
 SBP_ITEMS = 45
 
-# PAMA monthly vehicle production & sales (a new PDF is posted each month).
-PAMA_URL = "https://pama.org.pk/monthly-production-sales-of-vehicles/"
-
-# Your GitHub username - used to @mention you in the alert so you get an email.
-# If this is wrong you simply won't get the mention; change it to match.
 NOTIFY_USERNAME = "IMS-res"
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; personal-news-reader/1.0)"}
+HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/124.0.0.0 Safari/537.36")}
 
-# =============================================================================
-#  Machinery below - you can ignore it.
-# =============================================================================
 _MONTHS = ("january", "february", "march", "april", "may", "june", "july",
            "august", "september", "october", "november", "december")
 _STOPWORDS = ("festival", "gallery", "event", "career", "job opening", "jobs",
@@ -164,17 +133,7 @@ def _is_recent(struct_time):
         return False
 
 
-def _looks_like_release(text):
-    t = " ".join(text.split())
-    low = t.lower()
-    if len(t) < 18 or len(t.split()) < 3:
-        return False
-    if any(s in low for s in _STOPWORDS):
-        return False
-    return bool(_YEAR_RE.search(low) or _DATE_RE.search(low)
-                or any(m in low for m in _MONTHS))
-
-
+# ----------------------------------- NEWS -----------------------------------
 def fetch_rss(name, url):
     try:
         parsed = feedparser.parse(url, request_headers=HEADERS)
@@ -185,14 +144,26 @@ def fetch_rss(name, url):
             if not title or not link:
                 continue
             when = entry.get("published_parsed") or entry.get("updated_parsed")
-            items.append({"title": title, "link": link, "new": _is_recent(when),
-                          "source": name})
+            items.append({"title": title, "link": link,
+                          "new": _is_recent(when), "source": name})
         status = f"OK  {len(items):>2} items" if items else "NO ITEMS - check link"
         print(f"  [{status}]  {name}")
         return items
     except Exception as e:
         print(f"  [ERROR - {e}]  {name}")
         return []
+
+
+# ----------------------------------- PBS ------------------------------------
+def _looks_like_release(text):
+    t = " ".join(text.split())
+    low = t.lower()
+    if len(t) < 18 or len(t.split()) < 3:
+        return False
+    if any(s in low for s in _STOPWORDS):
+        return False
+    return bool(_YEAR_RE.search(low) or _DATE_RE.search(low)
+                or any(m in low for m in _MONTHS))
 
 
 def fetch_gov(source):
@@ -231,9 +202,8 @@ def fetch_gov(source):
         return []
 
 
+# --------------------------------- MARKETS ----------------------------------
 def _stooq_one(sym):
-    """Latest close + change% for one Stooq symbol. Tries light quote, then daily CSV."""
-    # 1) light quote endpoint (tiny response): Symbol,Date,Time,Open,H,L,Close,Vol
     try:
         u = f"https://stooq.com/q/l/?s={sym}&f=sd2t2ohlcv&h&e=csv"
         r = requests.get(u, headers=HEADERS, timeout=20)
@@ -245,7 +215,6 @@ def _stooq_one(sym):
                 return cl, (((cl - op) / op * 100) if op else 0.0)
     except Exception:
         pass
-    # 2) fallback: daily CSV for the last ~10 days, use last two closes
     try:
         today = _now().date()
         start = today - datetime.timedelta(days=10)
@@ -255,7 +224,7 @@ def _stooq_one(sym):
         rows = [x for x in r.text.splitlines()
                 if x.strip() and not x.lower().startswith("date")]
         if rows:
-            last = rows[-1].split(",")            # Date,Open,High,Low,Close,Volume
+            last = rows[-1].split(",")
             cl = float(last[4])
             prev = float(rows[-2].split(",")[4]) if len(rows) >= 2 else float(last[1])
             return cl, (((cl - prev) / prev * 100) if prev else 0.0)
@@ -265,10 +234,8 @@ def _stooq_one(sym):
 
 
 def fetch_quotes():
-    """Fetch each market symbol individually (more reliable than one batched call)."""
     pairs = [(g, n, s) for g, lst in MARKET_SNAPSHOT.items() for n, s in lst]
-    items = []
-    ok = 0
+    items, ok = [], 0
     for group, name, sym in pairs:
         q = _stooq_one(sym)
         if not q:
@@ -284,36 +251,7 @@ def fetch_quotes():
     return items
 
 
-def process_alerts(gov_items):
-    """Detect brand-new PBS/SBP releases; write alert.md for the workflow."""
-    STATE, ALERT = "state.json", "alert.md"
-    ids = [g.get("id", g["link"]) for g in gov_items]
-    first_run = not os.path.exists(STATE)
-    seen = set()
-    if not first_run:
-        try:
-            seen = set(json.load(open(STATE)))
-        except Exception:
-            seen = set()
-    new = [g for g in gov_items
-           if g.get("id", g["link"]) not in seen and g.get("notify", True)]
-    updated = list(seen) + [i for i in ids if i not in seen]
-    json.dump(updated[-1200:], open(STATE, "w"))
-
-    if first_run:
-        print("  First run - baseline saved, no alert sent.")
-        return
-    if new:
-        mention = f"@{NOTIFY_USERNAME}\n\n" if NOTIFY_USERNAME else ""
-        body = [mention, "New economic data release(s) detected:\n"]
-        for g in new:
-            body.append(f"- **{g['source']}**: [{g['title']}]({g['link']})")
-        open(ALERT, "w").write("\n".join(body))
-        print(f"  ALERT: {len(new)} new release(s) -> {ALERT}")
-    else:
-        print("  No new PBS/SBP releases this run.")
-
-
+# ----------------------------------- SBP ------------------------------------
 def _parse_date(text):
     m = re.search(r"([A-Z][a-z]+)\s+(\d{1,2}),?\s+(\d{4})", text)
     if not m:
@@ -328,7 +266,6 @@ def _parse_date(text):
 
 
 def fetch_sbp_data():
-    """Read SBP's Economic Data page; keep only the watchlist series."""
     try:
         resp = requests.get(SBP_URL, headers=HEADERS, timeout=30)
         resp.raise_for_status()
@@ -347,7 +284,7 @@ def fetch_sbp_data():
             low = text.lower()
             if not any(k in low for k in SBP_WATCH):
                 continue
-            if text in rows:                      # same row's PDF + Excel -> once
+            if text in rows:
                 continue
             if href.startswith("/"):
                 href = "https://www.sbp.org.pk" + href
@@ -356,8 +293,7 @@ def fetch_sbp_data():
                           "source": "SBP economic data", "id": text,
                           "notify": not is_daily, "date": _parse_date(text)}
         items = sorted(rows.values(),
-                       key=lambda x: x["date"] or datetime.date.min, reverse=True)
-        items = items[:SBP_ITEMS]
+                       key=lambda x: x["date"] or datetime.date.min, reverse=True)[:SBP_ITEMS]
         status = f"OK  {len(items):>2} items" if items else "NO ITEMS - layout may have changed"
         print(f"  [{status}]  SBP economic data")
         return items
@@ -366,52 +302,42 @@ def fetch_sbp_data():
         return []
 
 
-def fetch_pama():
-    """PAMA posts a new 'Production-Sales-<Month>-<Year>.pdf' each month."""
-    browser_headers = {
-        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                       "AppleWebKit/537.36 (KHTML, like Gecko) "
-                       "Chrome/124.0.0.0 Safari/537.36"),
-        "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
-                   "image/avif,image/webp,*/*;q=0.8"),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://pama.org.pk/",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    }
-    try:
-        resp = requests.get(PAMA_URL, headers=browser_headers, timeout=30)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        found = {}
-        for a in soup.find_all("a", href=True):
-            href = a["href"].strip()
-            low = href.lower()
-            if "production-sales" not in low or not low.endswith(".pdf"):
-                continue
-            fname = low.rsplit("/", 1)[-1]
-            year_m = re.search(r"20\d{2}", fname) or re.search(r"20\d{2}", low)
-            month = next((m for m in _MONTHS if m in fname), None)
-            if not year_m or not month:
-                continue
-            year = int(year_m.group())
-            if href.startswith("/"):
-                href = "https://pama.org.pk" + href
-            d = datetime.date(year, _MONTHS.index(month) + 1, 1)
-            found[href] = {"title": f"Auto Production & Sales - {month.title()} {year}",
-                           "link": href, "new": False, "source": "PAMA auto data",
-                           "id": href, "notify": True, "date": d}
-        items = sorted(found.values(), key=lambda x: x["date"], reverse=True)[:6]
-        status = f"OK  {len(items):>2} items" if items else "NO ITEMS - layout may have changed"
-        print(f"  [{status}]  PAMA auto data")
-        return items
-    except Exception as e:
-        print(f"  [ERROR - {e}]  PAMA auto data")
-        return []
+# ---------------------------------- ALERTS ----------------------------------
+def process_alerts(gov_items):
+    STATE, ALERT = "state.json", "alert.md"
+    ids = [g.get("id", g["link"]) for g in gov_items]
+    first_run = not os.path.exists(STATE)
+    seen = set()
+    if not first_run:
+        try:
+            seen = set(json.load(open(STATE)))
+        except Exception:
+            seen = set()
+    new = [g for g in gov_items
+           if g.get("id", g["link"]) not in seen and g.get("notify", True)]
+    updated = list(seen) + [i for i in ids if i not in seen]
+    json.dump(updated[-1200:], open(STATE, "w"))
+
+    if first_run:
+        print("  First run - baseline saved, no alert sent.")
+        if os.path.exists(ALERT):
+            os.remove(ALERT)
+        return
+    if new:
+        mention = f"@{NOTIFY_USERNAME}\n\n" if NOTIFY_USERNAME else ""
+        body = [mention, "New economic data release(s) detected:\n"]
+        for g in new:
+            body.append(f"- **{g['source']}**: [{g['title']}]({g['link']})")
+        open(ALERT, "w").write("\n".join(body))
+        print(f"  ALERT: {len(new)} new release(s) -> {ALERT}")
+    else:
+        print("  No new PBS/SBP releases this run.")
+        if os.path.exists(ALERT):
+            os.remove(ALERT)
 
 
+# -------------------------------- CSV EXPORT --------------------------------
 def write_csvs(sections):
-    """Also emit clean CSV files for Excel (Power Query) to read."""
     stamp = _now().strftime("%Y-%m-%d %H:%M UTC")
 
     with open("markets.csv", "w", newline="", encoding="utf-8-sig") as f:
@@ -449,6 +375,7 @@ def write_csvs(sections):
     print("  Wrote markets.csv, economic.csv, news.csv")
 
 
+# ---------------------------------- WEBPAGE ---------------------------------
 def build_page(sections):
     stamp = _now().strftime("%d %b %Y, %H:%M UTC")
     out = ["""<!doctype html><html lang="en"><head>
@@ -490,7 +417,7 @@ def build_page(sections):
                     cur = it.get("group")
                     out.append(f'<div class="src">{html.escape(cur)}</div>')
                 cls = "up" if it["pct"] >= 0 else "down"
-                arrow = "\u25b2" if it["pct"] >= 0 else "\u25bc"
+                arrow = "▲" if it["pct"] >= 0 else "▼"
                 out.append(
                     f'<a class="q" href="{html.escape(it["link"])}" target="_blank" rel="noopener">'
                     f'<span class="nm">{html.escape(it["name"])}</span>'
@@ -512,14 +439,13 @@ def build_page(sections):
     return "".join(out)
 
 
+# ----------------------------------- MAIN -----------------------------------
 def main():
     sections = []
 
-    # 1) Market snapshot first (the data panel).
     print("\nMarket snapshot")
     sections.append(("Market Snapshot (indices & commodities)", fetch_quotes()))
 
-    # 2) All the news categories.
     for category, feeds in FEEDS.items():
         print(f"\n{category}")
         collected = []
@@ -527,7 +453,6 @@ def main():
             collected.extend(fetch_rss(name, url))
         sections.append((category, collected))
 
-    # 3) Government data (PBS + SBP) + alert detection.
     print("\nGovernment data")
     gov_items = []
     gov_sections = {}
