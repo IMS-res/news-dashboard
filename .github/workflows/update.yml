@@ -1,12 +1,12 @@
 # Runs the dashboard on a timer, publishes the page, remembers what it has seen,
-# and opens a GitHub issue (which emails you) when PBS/SBP post something new.
+# and opens a GitHub issue (which emails you) when PBS/SBP data updates.
 # You do not need to change anything here.
 
 name: Update dashboard
 
 on:
   schedule:
-    - cron: "*/5 * * * *"      # every 5 minutes (UTC; GitHub may lag a little)
+    - cron: "*/15 * * * *"     # every 15 minutes (more reliable than */5 on the free tier)
   workflow_dispatch:            # run-by-hand button
   push:
     branches: [ main ]
@@ -14,8 +14,8 @@ on:
       - 'state.json'            # ignore the memory file so saving it can't loop
 
 permissions:
-  contents: write               # to save state.json back to the repo
-  issues: write                 # to open the alert issue
+  contents: write
+  issues: write
   pages: write
   id-token: write
 
